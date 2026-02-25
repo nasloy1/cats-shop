@@ -169,7 +169,7 @@ async def process_order(update, context, data, user):
 
     # ── Подтверждение пользователю
     items_text = '\n'.join(
-        f'  🐱 {i["name"]} — {f"{i[\"price\"]:,}".replace(",", " ")} ₽'
+        '  🐱 {} — {} ₽'.format(i['name'], '{:,}'.format(i['price']).replace(',', ' '))
         for i in items
     )
     await update.message.reply_text(
