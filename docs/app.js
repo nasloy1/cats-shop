@@ -5,8 +5,8 @@
 //  После того как Railway даст публичный URL — вставьте его сюда
 //  Пример: 'https://cats-shop-production-xxxx.up.railway.app'
 // ============================================================
-const BOT_API_URL = '';          // ← ВСТАВЬТЕ URL Railway после деплоя
-const API_SECRET  = 'cats-shop-secret';  // ← Должен совпадать с API_SECRET в Railway
+const BOT_API_URL = 'https://cats-shop-production.up.railway.app';
+const API_SECRET  = 'cats-shop-secret2026';  // ← Должен совпадать с API_SECRET в Railway
 
 // ============================================================
 //  CATALOG DATA — Донские сфинксы | фото: kot.pet
