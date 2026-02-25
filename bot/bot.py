@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 # ──────────────── Конфигурация ────────────────
 BOT_TOKEN     = os.getenv('BOT_TOKEN', '')
 MINI_APP_URL  = os.getenv('MINI_APP_URL', '')
-ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')
+ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')  # основной (для уведомлений о заказах)
+ADMIN_IDS     = set(i.strip() for i in ADMIN_CHAT_ID.split(',') if i.strip())
 GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '')
 API_SECRET    = os.getenv('API_SECRET', 'cats-shop-secret')
 PORT          = int(os.getenv('PORT', 8080))
@@ -326,7 +327,7 @@ async def handle_feedback(request):
 
 # ──────────────── Bot helpers ─────────────────
 def is_admin(update: Update) -> bool:
-    return str(update.effective_user.id) == str(ADMIN_CHAT_ID)
+    return str(update.effective_user.id) in ADMIN_IDS
 
 
 # ──────────────── Bot: /start ─────────────────
