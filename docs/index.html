@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Питомник котов</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== HEADER ===== -->
+  <header class="header">
+    <div class="header-inner">
+      <button id="btn-back" class="btn-icon hidden" onclick="goBack()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+      </button>
+      <div class="header-logo">
+        <span class="logo-icon">🐱</span>
+        <span id="header-title" class="header-title">Питомник котов</span>
+      </div>
+      <button class="btn-icon" onclick="navigate('cart')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 01-8 0"/>
+        </svg>
+        <span id="cart-badge" class="badge hidden">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== PAGE CONTAINER ===== -->
+  <div class="page-container">
+
+    <!-- CATALOG PAGE -->
+    <div id="page-catalog" class="page active">
+      <div class="search-wrap">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input type="text" id="search-input" placeholder="Поиск по породе или имени..." oninput="handleSearch(this.value)">
+          <button class="search-clear hidden" id="search-clear" onclick="clearSearch()">✕</button>
+        </div>
+      </div>
+      <div class="filter-wrap">
+        <div class="filter-scroll">
+          <button class="chip active" onclick="setCategory('all', this)">Все породы</button>
+          <button class="chip" onclick="setCategory('british', this)">Британские</button>
+          <button class="chip" onclick="setCategory('persian', this)">Персидские</button>
+          <button class="chip" onclick="setCategory('maine-coon', this)">Мейн-куны</button>
+          <button class="chip" onclick="setCategory('scottish', this)">Шотландские</button>
+          <button class="chip" onclick="setCategory('siberian', this)">Сибирские</button>
+          <button class="chip" onclick="setCategory('ragdoll', this)">Рэгдоллы</button>
+        </div>
+      </div>
+      <div id="catalog-grid" class="catalog-grid"></div>
+    </div>
+
+    <!-- DETAIL PAGE -->
+    <div id="page-detail" class="page">
+      <div id="detail-content"></div>
+    </div>
+
+    <!-- CART PAGE -->
+    <div id="page-cart" class="page">
+      <div id="cart-content"></div>
+    </div>
+
+    <!-- ORDER FORM PAGE -->
+    <div id="page-order" class="page">
+      <div class="form-page">
+        <div class="form-header">
+          <div class="form-icon">📦</div>
+          <h2>Оформление заказа</h2>
+          <p>Заполните форму и мы свяжемся с вами</p>
+        </div>
+        <form id="order-form" onsubmit="submitOrder(event)">
+          <div class="form-group">
+            <label>Ваше имя *</label>
+            <input type="text" id="order-name" placeholder="Иван Иванов" required autocomplete="name">
+          </div>
+          <div class="form-group">
+            <label>Телефон *</label>
+            <input type="tel" id="order-phone" placeholder="+7 (999) 000-00-00" required autocomplete="tel">
+          </div>
+          <div class="form-group">
+            <label>Адрес доставки</label>
+            <input type="text" id="order-address" placeholder="г. Москва, ул. Примерная, д. 1" autocomplete="street-address">
+          </div>
+          <div class="form-group">
+            <label>Комментарий</label>
+            <textarea id="order-comment" placeholder="Пожелания к заказу..." rows="3"></textarea>
+          </div>
+          <div id="order-items-preview" class="order-items-preview"></div>
+          <button type="submit" class="btn-primary">Отправить заказ</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- FEEDBACK PAGE -->
+    <div id="page-feedback" class="page">
+      <div class="form-page">
+        <div class="form-header">
+          <div class="form-icon">💬</div>
+          <h2>Обратная связь</h2>
+          <p>Задайте вопрос или оставьте отзыв</p>
+        </div>
+        <form id="feedback-form" onsubmit="submitFeedback(event)">
+          <div class="form-group">
+            <label>Ваше имя *</label>
+            <input type="text" id="fb-name" placeholder="Иван Иванов" required autocomplete="name">
+          </div>
+          <div class="form-group">
+            <label>Телефон или Email</label>
+            <input type="text" id="fb-contact" placeholder="+7 (999) 000-00-00 или email@mail.ru" autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label>Тема</label>
+            <select id="fb-subject">
+              <option value="question">Вопрос о котах</option>
+              <option value="booking">Запись на просмотр</option>
+              <option value="review">Отзыв о питомнике</option>
+              <option value="delivery">Вопрос о доставке</option>
+              <option value="other">Другое</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Сообщение *</label>
+            <textarea id="fb-message" placeholder="Напишите ваш вопрос или отзыв..." rows="5" required></textarea>
+          </div>
+          <button type="submit" class="btn-primary">Отправить сообщение</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ABOUT PAGE -->
+    <div id="page-about" class="page">
+      <div class="about-page">
+        <div class="about-hero">
+          <div class="about-emoji">🐾</div>
+          <h2>Питомник «Мурлыка»</h2>
+          <p class="about-subtitle">Профессиональное разведение котов с 2010 года</p>
+        </div>
+
+        <div class="about-cards">
+          <div class="about-card">
+            <span class="about-card-icon">🏆</span>
+            <h3>15 лет опыта</h3>
+            <p>Работаем с 2010 года</p>
+          </div>
+          <div class="about-card">
+            <span class="about-card-icon">🐱</span>
+            <h3>200+ котят</h3>
+            <p>Нашли новый дом</p>
+          </div>
+          <div class="about-card">
+            <span class="about-card-icon">⭐</span>
+            <h3>WCF сертификат</h3>
+            <p>С документами</p>
+          </div>
+          <div class="about-card">
+            <span class="about-card-icon">💉</span>
+            <h3>Все привиты</h3>
+            <p>Ветпаспорт в наличии</p>
+          </div>
+        </div>
+
+        <div class="about-section">
+          <h3>О питомнике</h3>
+          <p>Мы с любовью разводим породистых котов уже более 15 лет. Все котята рождаются и воспитываются в домашних условиях, проходят полную вакцинацию и ветеринарное обследование.</p>
+          <p>Каждый котёнок покидает наш питомник с ветеринарным паспортом, родословной и пакетом корма на первое время. Мы на связи даже после продажи — всегда готовы ответить на вопросы.</p>
+        </div>
+
+        <div class="about-section">
+          <h3>Наши породы</h3>
+          <div class="breeds-list">
+            <div class="breed-item">🇬🇧 Британские короткошёрстные</div>
+            <div class="breed-item">👑 Персидские</div>
+            <div class="breed-item">🦁 Мейн-куны</div>
+            <div class="breed-item">🏴󠁧󠁢󠁳󠁣󠁴󠁿 Шотландские (фолды и прямоухие)</div>
+            <div class="breed-item">❄️ Сибирские</div>
+            <div class="breed-item">💙 Рэгдоллы</div>
+          </div>
+        </div>
+
+        <div class="about-contacts">
+          <h3>Контакты</h3>
+          <div class="contact-item">
+            <span class="contact-icon">📞</span>
+            <span>+7 (999) 000-00-00</span>
+          </div>
+          <div class="contact-item">
+            <span class="contact-icon">📧</span>
+            <span>cats@example.ru</span>
+          </div>
+          <div class="contact-item">
+            <span class="contact-icon">📍</span>
+            <span>Москва, Россия</span>
+          </div>
+          <div class="contact-item">
+            <span class="contact-icon">🕐</span>
+            <span>Пн–Вс: 9:00 – 20:00</span>
+          </div>
+        </div>
+
+        <button class="btn-primary" onclick="navigate('feedback')">Написать нам</button>
+        <div style="height: 16px;"></div>
+      </div>
+    </div>
+
+  </div><!-- /page-container -->
+
+  <!-- ===== BOTTOM NAV ===== -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-page="catalog" onclick="navigate('catalog')">
+      <span class="nav-icon">🐱</span>
+      <span class="nav-label">Каталог</span>
+    </button>
+    <button class="nav-item" data-page="cart" onclick="navigate('cart')">
+      <span class="nav-icon">
+        🛒
+        <span id="nav-cart-badge" class="nav-badge hidden">0</span>
+      </span>
+      <span class="nav-label">Корзина</span>
+    </button>
+    <button class="nav-item" data-page="feedback" onclick="navigate('feedback')">
+      <span class="nav-icon">💬</span>
+      <span class="nav-label">Связь</span>
+    </button>
+    <button class="nav-item" data-page="about" onclick="navigate('about')">
+      <span class="nav-icon">ℹ️</span>
+      <span class="nav-label">О нас</span>
+    </button>
+  </nav>
+
+</div><!-- /app -->
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
