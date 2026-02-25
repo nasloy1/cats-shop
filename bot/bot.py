@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN     = os.getenv('BOT_TOKEN', '')
 MINI_APP_URL  = os.getenv('MINI_APP_URL', '')
 ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')
+GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '')  # ID группы Telegram для уведомлений
 
 
 # ──────────────── /start ─────────────────────
@@ -156,16 +157,16 @@ async def process_order(update, context, data, user):
     ]
     admin_msg = '\n'.join(admin_lines)
 
-    # Отправляем администратору
-    if ADMIN_CHAT_ID:
+    # Отправляем администратору и в группу
+    for chat_id in filter(None, [ADMIN_CHAT_ID, GROUP_CHAT_ID]):
         try:
             await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
+                chat_id=chat_id,
                 text=admin_msg,
                 parse_mode='HTML',
             )
         except Exception as exc:
-            logger.error(f'Failed to notify admin: {exc}')
+            logger.error(f'Failed to notify {chat_id}: {exc}')
 
     # ── Подтверждение пользователю
     items_text = '\n'.join(
@@ -205,15 +206,15 @@ async def process_feedback(update, context, data, user):
     ]
     admin_msg = '\n'.join(admin_lines)
 
-    if ADMIN_CHAT_ID:
+    for chat_id in filter(None, [ADMIN_CHAT_ID, GROUP_CHAT_ID]):
         try:
             await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
+                chat_id=chat_id,
                 text=admin_msg,
                 parse_mode='HTML',
             )
         except Exception as exc:
-            logger.error(f'Failed to notify admin: {exc}')
+            logger.error(f'Failed to notify {chat_id}: {exc}')
 
     await update.message.reply_text(
         '✅ <b>Спасибо за ваше сообщение!</b>\n\n'
