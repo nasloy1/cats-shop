@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
 """
-Telegram Bot для магазина котов
-Получает заказы и обратную связь из Mini App,
-уведомляет администратора.
+Telegram Bot для магазина котов.
+Запускает HTTP-сервер (aiohttp) для приёма заказов из Mini App
+И Telegram Bot polling — одновременно.
 """
 
 import os
 import json
+import asyncio
 import logging
 from datetime import datetime
 
+from aiohttp import web
 from dotenv import load_dotenv
 from telegram import (
-    Update,
-    WebAppInfo,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    Update, WebAppInfo,
+    KeyboardButton, ReplyKeyboardMarkup,
+    InlineKeyboardButton, InlineKeyboardMarkup,
 )
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
-    ContextTypes,
+    Application, CommandHandler,
+    MessageHandler, filters, ContextTypes,
 )
 
 load_dotenv()
@@ -40,214 +35,201 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN     = os.getenv('BOT_TOKEN', '')
 MINI_APP_URL  = os.getenv('MINI_APP_URL', '')
 ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')
-GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '')  # ID группы Telegram для уведомлений
+GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '')
+API_SECRET    = os.getenv('API_SECRET', 'cats-shop-secret')
+PORT          = int(os.getenv('PORT', 8080))
+
+# Глобальная ссылка на бота (используется в HTTP-обработчиках)
+_bot = None
 
 
-# ──────────────── /start ─────────────────────
+# ──────────────── CORS helpers ───────────────
+def cors_headers():
+    return {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Secret',
+    }
+
+
+async def handle_options(request):
+    """Preflight CORS запросы от браузера."""
+    return web.Response(status=200, headers=cors_headers())
+
+
+# ──────────────── HTTP: /health ───────────────
+async def handle_health(request):
+    return web.json_response({'ok': True, 'status': 'running'})
+
+
+# ──────────────── HTTP: /order ────────────────
+async def handle_order(request):
+    if request.headers.get('X-Secret') != API_SECRET:
+        return web.json_response(
+            {'ok': False, 'error': 'Unauthorized'},
+            status=401, headers=cors_headers()
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {'ok': False, 'error': 'Invalid JSON'},
+            status=400, headers=cors_headers()
+        )
+
+    items     = data.get('items', [])
+    total     = data.get('total', 0)
+    now       = datetime.now().strftime('%d.%m.%Y %H:%M')
+    total_str = '{:,}'.format(total).replace(',', ' ')
+
+    lines = [
+        '🛍️ <b>НОВЫЙ ЗАКАЗ!</b>',
+        '━' * 22,
+        f'👤 <b>Имя:</b> {data.get("name", "—")}',
+        f'📞 <b>Телефон:</b> {data.get("phone", "—")}',
+    ]
+    if data.get('address'):
+        lines.append(f'📍 <b>Адрес:</b> {data["address"]}')
+    if data.get('comment'):
+        lines.append(f'💬 <b>Комментарий:</b> {data["comment"]}')
+
+    lines.append(f'\n🐱 <b>Котята ({len(items)}):</b>')
+    for item in items:
+        price_str = '{:,}'.format(item['price']).replace(',', ' ')
+        lines.append(f'  • {item["name"]} ({item["breed"]}) — {price_str} ₽')
+
+    lines += [
+        '',
+        f'💰 <b>Итого: {total_str} ₽</b>',
+        '━' * 22,
+        f'🕐 {now}',
+    ]
+    msg = '\n'.join(lines)
+
+    for chat_id in filter(None, [ADMIN_CHAT_ID, GROUP_CHAT_ID]):
+        try:
+            await _bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
+        except Exception as exc:
+            logger.error(f'Ошибка отправки в {chat_id}: {exc}')
+
+    return web.json_response({'ok': True}, headers=cors_headers())
+
+
+# ──────────────── HTTP: /feedback ─────────────
+async def handle_feedback(request):
+    if request.headers.get('X-Secret') != API_SECRET:
+        return web.json_response(
+            {'ok': False, 'error': 'Unauthorized'},
+            status=401, headers=cors_headers()
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {'ok': False, 'error': 'Invalid JSON'},
+            status=400, headers=cors_headers()
+        )
+
+    now = datetime.now().strftime('%d.%m.%Y %H:%M')
+
+    lines = [
+        '💬 <b>ОБРАТНАЯ СВЯЗЬ</b>',
+        '━' * 22,
+        f'👤 <b>Имя:</b> {data.get("name", "—")}',
+    ]
+    if data.get('contact'):
+        lines.append(f'📞 <b>Контакт:</b> {data["contact"]}')
+
+    lines += [
+        f'📋 <b>Тема:</b> {data.get("subject", "—")}',
+        '',
+        '✉️ <b>Сообщение:</b>',
+        data.get('message', '—'),
+        '━' * 22,
+        f'🕐 {now}',
+    ]
+    msg = '\n'.join(lines)
+
+    for chat_id in filter(None, [ADMIN_CHAT_ID, GROUP_CHAT_ID]):
+        try:
+            await _bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
+        except Exception as exc:
+            logger.error(f'Ошибка отправки в {chat_id}: {exc}')
+
+    return web.json_response({'ok': True}, headers=cors_headers())
+
+
+# ──────────────── Bot: /start ─────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-
-    # Кнопка для открытия Mini App
     keyboard = [[
-        KeyboardButton(
-            '🐱 Открыть магазин котов',
-            web_app=WebAppInfo(url=MINI_APP_URL),
-        )
+        KeyboardButton('🐱 Открыть магазин котов', web_app=WebAppInfo(url=MINI_APP_URL))
     ]]
     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
     await update.message.reply_text(
         f'Привет, {user.first_name}! 👋\n\n'
         '🐾 Добро пожаловать в питомник <b>«Мурлыка»</b>!\n\n'
-        'У нас есть котята лучших пород:\n'
-        '• Британские 🇬🇧\n'
-        '• Персидские 👑\n'
-        '• Мейн-куны 🦁\n'
-        '• Шотландские 🏴󠁧󠁢󠁳󠁣󠁴󠁿\n'
-        '• Рэгдоллы 💙\n'
-        '• Сибирские ❄️\n\n'
+        'Донские сфинксы — тёплые, гипоаллергенные и невероятно ласковые.\n\n'
         'Нажмите кнопку ниже, чтобы открыть каталог:',
         reply_markup=markup,
         parse_mode='HTML',
     )
 
 
-# ──────────────── /help ──────────────────────
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        '🐱 <b>Питомник «Мурлыка»</b> — помощь\n\n'
+        '🐱 <b>Питомник «Мурлыка»</b>\n\n'
         '/start — Открыть магазин\n'
-        '/catalog — Краткий список котов\n'
-        '/help — Эта справка\n\n'
-        'По всем вопросам используйте форму обратной связи в приложении.',
-        parse_mode='HTML',
-    )
-
-
-# ──────────────── /catalog ───────────────────
-async def cmd_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[
-        InlineKeyboardButton(
-            '🐱 Открыть каталог',
-            web_app=WebAppInfo(url=MINI_APP_URL),
-        )
-    ]]
-    await update.message.reply_text(
-        '📋 Нажмите кнопку ниже, чтобы просмотреть каталог котят:',
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-
-# ──────────────── Web App Data ───────────────
-async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает данные, отправленные из Mini App через sendData()"""
-    user = update.effective_user
-    raw  = update.message.web_app_data.data
-
-    logger.info(f'WebApp data from {user.id}: {raw[:200]}')
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.error(f'Invalid JSON: {raw}')
-        await update.message.reply_text('❌ Ошибка обработки данных.')
-        return
-
-    data_type = data.get('type')
-
-    if data_type == 'order':
-        await process_order(update, context, data, user)
-    elif data_type == 'feedback':
-        await process_feedback(update, context, data, user)
-    else:
-        logger.warning(f'Unknown data type: {data_type}')
-
-
-async def process_order(update, context, data, user):
-    """Обработка нового заказа"""
-    items = data.get('items', [])
-    total = data.get('total', 0)
-    now   = datetime.now().strftime('%d.%m.%Y %H:%M')
-
-    # ── Сообщение для администратора
-    admin_lines = [
-        '🛍️ <b>НОВЫЙ ЗАКАЗ!</b>',
-        '━' * 24,
-        f'👤 <b>Имя:</b> {data.get("name", "—")}',
-        f'📞 <b>Телефон:</b> {data.get("phone", "—")}',
-    ]
-    if data.get('address'):
-        admin_lines.append(f'📍 <b>Адрес:</b> {data["address"]}')
-    if data.get('comment'):
-        admin_lines.append(f'💬 <b>Комментарий:</b> {data["comment"]}')
-
-    admin_lines.append('')
-    admin_lines.append(f'🐱 <b>Котята ({len(items)}):</b>')
-    for item in items:
-        price_str = f'{item["price"]:,}'.replace(',', ' ')
-        admin_lines.append(f'  • {item["name"]} ({item["breed"]}) — {price_str} ₽')
-
-    total_str = f'{total:,}'.replace(',', ' ')
-    admin_lines += [
-        '',
-        f'💰 <b>Итого: {total_str} ₽</b>',
-        '━' * 24,
-        f'👤 Telegram: {user.mention_html()}',
-        f'🕐 {now}',
-    ]
-    admin_msg = '\n'.join(admin_lines)
-
-    # Отправляем администратору и в группу
-    for chat_id in filter(None, [ADMIN_CHAT_ID, GROUP_CHAT_ID]):
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=admin_msg,
-                parse_mode='HTML',
-            )
-        except Exception as exc:
-            logger.error(f'Failed to notify {chat_id}: {exc}')
-
-    # ── Подтверждение пользователю
-    items_text = '\n'.join(
-        '  🐱 {} — {} ₽'.format(i['name'], '{:,}'.format(i['price']).replace(',', ' '))
-        for i in items
-    )
-    await update.message.reply_text(
-        '✅ <b>Ваш заказ принят!</b>\n\n'
-        f'<b>Котята:</b>\n{items_text}\n\n'
-        f'<b>Итого: {total_str} ₽</b>\n\n'
-        f'Мы свяжемся с вами по номеру <code>{data.get("phone", "")}</code> '
-        'в течение рабочего дня для подтверждения. 🐾',
-        parse_mode='HTML',
-    )
-
-
-async def process_feedback(update, context, data, user):
-    """Обработка обратной связи"""
-    now = datetime.now().strftime('%d.%m.%Y %H:%M')
-
-    admin_lines = [
-        '💬 <b>ОБРАТНАЯ СВЯЗЬ</b>',
-        '━' * 24,
-        f'👤 <b>Имя:</b> {data.get("name", "—")}',
-    ]
-    if data.get('contact'):
-        admin_lines.append(f'📞 <b>Контакт:</b> {data["contact"]}')
-
-    admin_lines += [
-        f'📋 <b>Тема:</b> {data.get("subject", "—")}',
-        '',
-        f'✉️ <b>Сообщение:</b>',
-        data.get('message', '—'),
-        '━' * 24,
-        f'👤 Telegram: {user.mention_html()}',
-        f'🕐 {now}',
-    ]
-    admin_msg = '\n'.join(admin_lines)
-
-    for chat_id in filter(None, [ADMIN_CHAT_ID, GROUP_CHAT_ID]):
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=admin_msg,
-                parse_mode='HTML',
-            )
-        except Exception as exc:
-            logger.error(f'Failed to notify {chat_id}: {exc}')
-
-    await update.message.reply_text(
-        '✅ <b>Спасибо за ваше сообщение!</b>\n\n'
-        'Мы ответим вам в ближайшее время. 🐾',
+        '/help — Справка',
         parse_mode='HTML',
     )
 
 
 # ──────────────── Запуск ─────────────────────
-def main():
+async def run():
+    global _bot
+
     if not BOT_TOKEN:
-        print('ОШИБКА: Не задан BOT_TOKEN в файле .env!')
+        print('ОШИБКА: BOT_TOKEN не задан!')
         return
-    if not MINI_APP_URL:
-        print('ПРЕДУПРЕЖДЕНИЕ: MINI_APP_URL не задан — кнопка Mini App не будет работать!')
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    # ── Telegram bot ──
+    tg_app = Application.builder().token(BOT_TOKEN).build()
+    tg_app.add_handler(CommandHandler('start', cmd_start))
+    tg_app.add_handler(CommandHandler('help',  cmd_help))
+    _bot = tg_app.bot
 
-    app.add_handler(CommandHandler('start',   cmd_start))
-    app.add_handler(CommandHandler('help',    cmd_help))
-    app.add_handler(CommandHandler('catalog', cmd_catalog))
-    app.add_handler(MessageHandler(
-        filters.StatusUpdate.WEB_APP_DATA,
-        handle_web_app_data,
-    ))
+    # ── HTTP server ──
+    http_app = web.Application()
+    http_app.router.add_get('/health', handle_health)
+    http_app.router.add_post('/order',    handle_order)
+    http_app.router.add_post('/feedback', handle_feedback)
+    http_app.router.add_route('OPTIONS', '/order',    handle_options)
+    http_app.router.add_route('OPTIONS', '/feedback', handle_options)
 
-    print('🐱 Cat Shop Bot запущен!')
-    print(f'   Mini App URL: {MINI_APP_URL or "(не задан)"}')
-    print(f'   Admin Chat:   {ADMIN_CHAT_ID or "(не задан)"}')
-    print('   Нажмите Ctrl+C для остановки.\n')
+    runner = web.AppRunner(http_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    logger.info(f'HTTP сервер запущен на порту {PORT}')
 
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # ── Start polling ──
+    await tg_app.initialize()
+    await tg_app.start()
+    await tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info('Бот запущен!')
+    logger.info(f'Mini App URL: {MINI_APP_URL}')
+
+    try:
+        await asyncio.Event().wait()   # работаем бесконечно
+    finally:
+        await tg_app.updater.stop()
+        await tg_app.stop()
+        await tg_app.shutdown()
+        await runner.cleanup()
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(run())

@@ -1,6 +1,14 @@
 'use strict';
 
 // ============================================================
+//  КОНФИГУРАЦИЯ API
+//  После того как Railway даст публичный URL — вставьте его сюда
+//  Пример: 'https://cats-shop-production-xxxx.up.railway.app'
+// ============================================================
+const BOT_API_URL = '';          // ← ВСТАВЬТЕ URL Railway после деплоя
+const API_SECRET  = 'cats-shop-secret';  // ← Должен совпадать с API_SECRET в Railway
+
+// ============================================================
 //  CATALOG DATA — Донские сфинксы | фото: kot.pet
 // ============================================================
 const CATS = [
@@ -593,14 +601,35 @@ function submitFeedback(e) {
   showToast('Сообщение отправлено! ✅', 'success');
 }
 
-/** Отправляем данные боту через Telegram WebApp API */
-function sendToBot(data) {
-  const tg = window.Telegram?.WebApp;
-  if (tg && typeof tg.sendData === 'function') {
-    tg.sendData(JSON.stringify(data));
-  } else {
-    // Fallback для отладки в браузере (вне Telegram)
-    console.log('[Bot data]', data);
+/** Отправляем данные боту через HTTP API */
+async function sendToBot(data) {
+  // Если URL не задан — выводим в консоль (режим разработки)
+  if (!BOT_API_URL) {
+    console.log('[Bot data — API URL не задан]', data);
+    return true;
+  }
+
+  const endpoint = data.type === 'order' ? '/order' : '/feedback';
+
+  try {
+    const resp = await fetch(BOT_API_URL + endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Secret': API_SECRET,
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || 'Server error ' + resp.status);
+    }
+    return true;
+  } catch (err) {
+    console.error('[Bot API]', err);
+    showToast('Ошибка отправки. Попробуйте ещё раз.', 'error');
+    return false;
   }
 }
 
