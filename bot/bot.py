@@ -39,6 +39,8 @@ GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '')
 API_SECRET    = os.getenv('API_SECRET', 'cats-shop-secret')
 PORT          = int(os.getenv('PORT', 8080))
 DB_PATH       = os.getenv('DB_PATH', 'cats.db')
+PUBLIC_URL    = os.getenv('PUBLIC_URL', '').rstrip('/')   # https://cats-shop-production.up.railway.app
+PHOTOS_DIR    = os.getenv('PHOTOS_DIR', 'photos')
 
 # Глобальная ссылка на бота
 _bot = None
@@ -205,6 +207,17 @@ async def handle_options(request):
 # ──────────────── HTTP: /health ───────────────
 async def handle_health(request):
     return web.json_response({'ok': True, 'status': 'running'})
+
+
+# ──────────────── HTTP: /photos/{filename} ───
+async def handle_photo_file(request):
+    filename = request.match_info['filename']
+    if '/' in filename or '..' in filename:
+        raise web.HTTPForbidden()
+    filepath = os.path.join(PHOTOS_DIR, filename)
+    if not os.path.isfile(filepath):
+        raise web.HTTPNotFound()
+    return web.FileResponse(filepath)
 
 
 # ──────────────── HTTP: /cats ─────────────────
@@ -535,16 +548,27 @@ async def addcat_color(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def addcat_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['new_cat']['description'] = update.message.text.strip()
     await update.message.reply_text(
-        '<b>Шаг 8/8</b> — Отправьте <b>ссылку на фото</b> (URL)\n\n'
-        'Или напишите <b>.</b> чтобы оставить без фото.',
+        '<b>Шаг 8/8</b> — Отправьте <b>фото</b> котёнка 📷\n\n'
+        'Или вставьте ссылку на фото (URL)\n'
+        'Или напишите <b>.</b> чтобы пропустить.',
         parse_mode='HTML',
     )
     return ADD_PHOTO
 
 
 async def addcat_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    image = text if text != '.' else ''
+    if update.message.photo:
+        # Пользователь отправил фото — скачиваем и сохраняем
+        tg_photo = update.message.photo[-1]   # берём максимальный размер
+        tg_file  = await context.bot.get_file(tg_photo.file_id)
+        os.makedirs(PHOTOS_DIR, exist_ok=True)
+        filename = '{}.jpg'.format(tg_photo.file_unique_id)
+        await tg_file.download_to_drive(os.path.join(PHOTOS_DIR, filename))
+        image = '{}/photos/{}'.format(PUBLIC_URL, filename) if PUBLIC_URL else ''
+    else:
+        text  = update.message.text.strip()
+        image = text if text != '.' else ''
+
     cat = context.user_data['new_cat']
     cat['image'] = image
 
@@ -614,7 +638,10 @@ async def run():
             ADD_PRICE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, addcat_price)],
             ADD_COLOR:  [MessageHandler(filters.TEXT & ~filters.COMMAND, addcat_color)],
             ADD_DESC:   [MessageHandler(filters.TEXT & ~filters.COMMAND, addcat_desc)],
-            ADD_PHOTO:  [MessageHandler(filters.TEXT & ~filters.COMMAND, addcat_photo)],
+            ADD_PHOTO:  [
+                MessageHandler(filters.PHOTO, addcat_photo),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, addcat_photo),
+            ],
         },
         fallbacks=[CommandHandler('cancel', addcat_cancel)],
         allow_reentry=True,
@@ -625,8 +652,9 @@ async def run():
 
     # ── HTTP server ──
     http_app = web.Application()
-    http_app.router.add_get('/health',    handle_health)
-    http_app.router.add_get('/cats',      handle_cats)
+    http_app.router.add_get('/health',             handle_health)
+    http_app.router.add_get('/cats',               handle_cats)
+    http_app.router.add_get('/photos/{filename}',  handle_photo_file)
     http_app.router.add_post('/order',    handle_order)
     http_app.router.add_post('/feedback', handle_feedback)
     http_app.router.add_route('OPTIONS', '/cats',     handle_options)
